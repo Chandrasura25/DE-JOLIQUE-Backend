@@ -30,7 +30,7 @@ export function errorHandler(err, req, res, next) {
     status = 400;
     message =
       err.code === 'LIMIT_FILE_SIZE'
-        ? 'Each image must be 5MB or smaller.'
+        ? 'Each image must be 4MB or smaller.'
         : err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE'
           ? 'You can upload up to 6 images at a time.'
           : 'Invalid upload.';

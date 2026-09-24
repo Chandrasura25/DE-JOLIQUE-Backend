@@ -39,6 +39,8 @@ const schema = z.object({
   SHIPPING_FEE: z.coerce.number().min(0).default(0),
   LOW_STOCK_THRESHOLD: z.coerce.number().int().min(0).default(5),
   PENDING_ORDER_TTL_HOURS: z.coerce.number().min(0).default(48),
+  // Vercel Cron sends it as "Authorization: Bearer <CRON_SECRET>". Leave empty to disable the endpoint.
+  CRON_SECRET: optionalString,
 
   PAYSTACK_SECRET_KEY: optionalString,
   PAYSTACK_PUBLIC_KEY: optionalString,

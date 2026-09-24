@@ -295,6 +295,13 @@ export function buildOpenApiSpec() {
         },
       },
 
+      '/cron/expire-orders': {
+        get: {
+          tags: ['System'],
+          summary: 'Cancel abandoned unpaid orders (Vercel Cron only; needs Authorization: Bearer <CRON_SECRET>)',
+          responses: { 200: ok(envelope({ expired: { type: 'integer' } })), ...pick(404) },
+        },
+      },
       '/auth/providers': {
         get: {
           tags: ['Auth'],

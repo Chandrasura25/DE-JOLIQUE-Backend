@@ -662,3 +662,13 @@ describe('admin user management', () => {
     await api.delete(`/api/admin/users/${customer.id}`).set(admin.auth).expect(404);
   });
 });
+
+describe('Vercel Cron endpoint', () => {
+  test('only runs with the exact CRON_SECRET bearer token', async () => {
+    await api.get('/api/cron/expire-orders').expect(404);
+    await api.get('/api/cron/expire-orders').set('Authorization', 'Bearer wrong-secret').expect(404);
+    await api.get('/api/cron/expire-orders').set('Authorization', 'Bearer test-cron-secret-extra').expect(404);
+    const res = await api.get('/api/cron/expire-orders').set('Authorization', 'Bearer test-cron-secret').expect(200);
+    assert.equal(typeof res.body.expired, 'number');
+  });
+});

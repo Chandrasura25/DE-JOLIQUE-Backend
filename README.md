@@ -48,7 +48,8 @@ server/
 │   ├── seed/                   # seed.js + sample data
 │   ├── scripts/createAdmin.js
 │   ├── app.js                  # Express app
-│   └── index.js                # entry point (also runs the abandoned-order sweep)
+│   └── index.js                # entry for local/long-running hosts (also runs the abandoned-order sweep)
+├── api/index.js                # Vercel entry: exports the Express app as a serverless function
 ├── supabase/
 │   ├── config.toml             # Supabase CLI config (local stack)
 │   └── migrations/             # timestamped SQL migrations
@@ -56,6 +57,7 @@ server/
 ├── .github/workflows/
 │   ├── ci.yml                  # runs the test suite on every push and PR
 │   └── supabase-migrations.yml # validates migrations on PRs, `supabase db push` on master
+├── vercel.json                 # Vercel build, routing, region and daily cron
 ├── .env.example
 └── package.json
 ```
@@ -118,17 +120,18 @@ To try protected endpoints in Swagger, run **`POST /auth/login`** there first. I
 | `SERVER_URL` | ✔ | Public URL the browser uses to reach this API. `<SERVER_URL>/api/auth/callback` is where Google and email links return. **Behind the Vercel `/api` proxy, this is the storefront URL** (section 13). |
 | `DATABASE_URL` | ✔ | Supabase Postgres connection string (section 4) |
 | `DATABASE_SSL` | | `true` for Supabase cloud, `false` for a local `supabase start` |
-| `DATABASE_POOL_MAX` | | Connection pool size (default `10`) |
+| `DATABASE_POOL_MAX` | | Connection pool size (default `10`; use `2`–`3` on Vercel) |
 | `SUPABASE_URL` | ✔ | `https://<project-ref>.supabase.co` |
 | `SUPABASE_ANON_KEY` | ✔ | Used server-side for sign-in, sign-up, Google, refresh and password reset |
 | `SUPABASE_SERVICE_ROLE_KEY` | ✔ | Server only. Auth Admin API (users, admin account) and Storage uploads |
 | `AUTH_COOKIE_SAME_SITE` | | `lax` (default), `strict` or `none`. Only use `none` (HTTPS required) if the storefront calls the API cross-site without the proxy. |
-| `TRUST_PROXY` | | Number of proxies in front of the API, so rate limits see real client IPs. `1` on Render/Railway; add one more if requests also pass through the Vercel proxy. |
+| `TRUST_PROXY` | | Number of proxies in front of the API, so rate limits see real client IPs. `1` on Vercel, Render or Railway. |
 | `SERVE_CLIENT` | | `true` to serve a built storefront from `../client/dist` (single-service deploy) |
 | `STORE_NAME`, `CURRENCY` | | Defaults: `De-Jolique Enterprise`, `NGN` |
 | `SHIPPING_FEE` | | Flat delivery fee added to each order (default `0`) |
 | `LOW_STOCK_THRESHOLD` | | Low-stock warning level (default `5`) |
 | `PENDING_ORDER_TTL_HOURS` | | Unpaid orders are cancelled after this many hours (default `48`, `0` disables) |
+| `CRON_SECRET` | on Vercel | Long random string; Vercel Cron sends it to `/api/cron/expire-orders` |
 | `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY` | one provider | Paystack keys |
 | `FLUTTERWAVE_SECRET_KEY`, `FLUTTERWAVE_PUBLIC_KEY` | one provider | Flutterwave keys |
 | `FLUTTERWAVE_WEBHOOK_HASH` | for FW webhooks | The "secret hash" set in the Flutterwave dashboard |
@@ -208,7 +211,7 @@ Both providers get the return URL per transaction (`<CLIENT_URL>/payment/callbac
 
 ## 6. Image storage
 
-Admin uploads go through `POST /api/admin/uploads`. Files are held in memory, checked by their **real file signature** (JPEG/PNG/WebP/GIF, ≤ 5 MB), then sent to the configured provider. Only the URL and key are stored on the product.
+Admin uploads go through `POST /api/admin/uploads`, one image per request (Vercel caps a request body at 4.5 MB). Files are held in memory, checked by their **real file signature** (JPEG/PNG/WebP/GIF, ≤ 4 MB), then sent to the configured provider. Only the URL and key are stored on the product.
 
 | `STORAGE_PROVIDER` | Setup |
 | --- | --- |
@@ -261,6 +264,7 @@ Full, interactive documentation: **`/api/docs`**. Summary:
 | Method | Path | Access |
 | --- | --- | --- |
 | GET | `/api/health`, `/api/config` | public |
+| GET | `/api/cron/expire-orders` | Vercel Cron (`CRON_SECRET`) |
 | GET | `/api/auth/providers` | public |
 | POST | `/api/auth/register`, `/api/auth/login`, `/api/auth/forgot-password` | public (rate-limited) |
 | POST | `/api/auth/logout` | public |
@@ -323,7 +327,7 @@ Provider ─► POST /payments/<p>/webhook (signature checked) ─────�
 
 - **Concurrency.** The conditional `UPDATE … WHERE stock >= q` takes a row lock, so when two buyers race for the last unit, the second matches no rows. `CHECK (stock >= 0)` backs this up.
 - **Failed payments never touch stock.** Stock is only deducted after a verified success.
-- **Abandoned orders.** Every 30 minutes the server checks unpaid orders older than `PENDING_ORDER_TTL_HOURS` with the provider. They are settled if they were actually paid, and cancelled otherwise. This needs a long-running process (see section 13).
+- **Abandoned orders.** Unpaid orders older than `PENDING_ORDER_TTL_HOURS` are checked with the provider. They are settled if they were actually paid (the redirect and the webhook both failed), and cancelled otherwise. Stock is never held by unpaid orders, so this is housekeeping plus a safety net. It runs every 30 minutes under `npm start`, and once a day via Vercel Cron on Vercel.
 - **Anything unusual** (a duplicate payment, a payment for a cancelled order, a failed refund) is flagged `requires_attention` and shown on the admin dashboard.
 
 ---
@@ -345,16 +349,31 @@ Provider ─► POST /payments/<p>/webhook (signature checked) ─────�
 
 ## 13. Deployment
 
-The API needs a **long-running Node process** (the abandoned-order sweep runs on a timer), so host it on **Render, Railway, Fly.io or a VPS**. Serverless platforms would never run the timer.
+### Vercel (the setup this repo is configured for)
 
-1. **Database:** `npx supabase db push` (or merge to `master` and let the GitHub Action do it), then `npm run seed` once, or just `npm run create-admin`.
-2. **Host settings:** build `npm ci`, start `npm start`, Node 22. Set every variable from `.env.example` with `NODE_ENV=production` and live payment keys.
-3. **With the storefront on Vercel (recommended setup):** the storefront's `vercel.json` proxies `/api/*` to this API, so the browser only ever sees one site. Cookies stay first-party (Safari and other browsers that block third-party cookies keep working), and `AUTH_COOKIE_SAME_SITE` can stay `lax`. Then set:
-   - `CLIENT_URL=https://<storefront-domain>`
-   - `SERVER_URL=https://<storefront-domain>`: the public URL the browser uses, which is the proxy, not the API host
-   - `TRUST_PROXY=2` on Render/Railway (the host's proxy plus Vercel's)
-4. **Supabase Auth:** set Site URL to `https://<storefront-domain>` and add `https://<storefront-domain>/api/auth/callback**` to Redirect URLs.
-5. **Payment webhooks:** point both dashboards at `https://<api-host>/api/payments/<provider>/webhook`. Webhooks don't need the proxy.
-6. Log in at `/admin/login` and change the seeded password.
+`vercel.json` deploys **only** `api/index.js` as a Node serverless function (the `builds` entry). Every path is routed to it, so no project file is ever served as a static file. It also bundles Swagger UI's assets, pins the function to **`fra1`** (Frankfurt, next to the Supabase database in `eu-central-1`), and schedules the abandoned-order cron.
+
+1. **Database:** `npx supabase db push` (or merge to `master` and let the GitHub Action do it), then `npm run seed` once, or just `npm run create-admin`, from your machine against the production database.
+2. **Create the Vercel project** from this repository. There is no build step, and the framework preset is ignored because `vercel.json` defines the build.
+3. **Environment variables** (Project → Settings → Environment Variables): everything from `.env.example`, plus:
+   - `NODE_ENV=production`, `TRUST_PROXY=1`, live payment keys
+   - `DATABASE_URL`: the Supabase **transaction pooler** URI (port `6543`), with `DATABASE_POOL_MAX=3`. Serverless functions open many short-lived connections, which is what the transaction pooler is for.
+   - `CRON_SECRET`: a long random string (`openssl rand -hex 32`)
+   - `STORAGE_PROVIDER=supabase` (or cloudinary / s3). **Not `local`**: a function's disk isn't kept.
+   - `CLIENT_URL` and `SERVER_URL`: both set to the **storefront** URL (see below)
+4. **Storefront proxy:** the storefront's `vercel.json` forwards `/api/*` to this project's domain (`https://<api-project>.vercel.app`). The browser only ever talks to the storefront domain, so session cookies are first-party (Safari keeps working) and `AUTH_COOKIE_SAME_SITE` can stay `lax`. That's why `SERVER_URL` is the storefront URL: Google and email links must return through the proxy to set cookies on the right domain.
+5. **Supabase Auth:** set Site URL to `https://<storefront-domain>` and add `https://<storefront-domain>/api/auth/callback**` to Redirect URLs.
+6. **Payment webhooks:** `https://<api-project>.vercel.app/api/payments/paystack/webhook` and `…/flutterwave/webhook`.
+7. Log in at `/admin/login` and change the seeded password.
+
+**Serverless limits to know about**
+
+- **Cron frequency:** the Hobby plan runs crons at most once a day, hence `0 3 * * *` (03:00 UTC). On Pro you can make it hourly (`0 * * * *`).
+- **Uploads:** request bodies are capped at 4.5 MB. The admin uploads images one per request, up to 4 MB each.
+- **Rate limits** are counted per function instance, so under heavy traffic they are looser than the numbers in `src/middleware/rateLimiters.js`. For strict limits, use Vercel's firewall rules.
+
+### Any long-running Node host (Render, Railway, Fly.io, a VPS)
+
+Build `npm ci`, start `npm start` (`src/index.js`). The abandoned-order sweep then runs every 30 minutes by itself, so no `CRON_SECRET` is needed. The environment is the same as above, except `TRUST_PROXY` is the number of proxies in front of the app, and the session pooler (port `5432`) with the default pool size is fine.
 
 *Single-service alternative:* deploy the `client/` folder next to this one, build it, and run the API with `SERVE_CLIENT=true`. It then serves the storefront and the API from one origin.

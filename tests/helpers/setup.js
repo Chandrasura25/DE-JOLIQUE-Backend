@@ -36,6 +36,7 @@ export async function setupTestApp() {
     SHIPPING_FEE: '1500',
     LOW_STOCK_THRESHOLD: '5',
     CURRENCY: 'NGN',
+    CRON_SECRET: 'test-cron-secret',
   });
 
   const { createApp } = await import('../../src/app.js');

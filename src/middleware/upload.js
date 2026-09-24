@@ -2,11 +2,14 @@ import multer from 'multer';
 import AppError from '../utils/AppError.js';
 
 export const MAX_IMAGES_PER_UPLOAD = 6;
+// Vercel rejects request bodies over 4.5 MB, so the admin uploads one image per
+// request and each image must leave room for the multipart overhead.
+export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
 /** Files are held in memory only long enough to hand them to the storage provider. */
 export const imageUpload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024, files: MAX_IMAGES_PER_UPLOAD },
+  limits: { fileSize: MAX_IMAGE_BYTES, files: MAX_IMAGES_PER_UPLOAD },
   fileFilter(req, file, cb) {
     if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.mimetype)) {
       return cb(AppError.badRequest('Only JPEG, PNG, WebP or GIF images are allowed.'));

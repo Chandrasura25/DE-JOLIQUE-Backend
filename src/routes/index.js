@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { getPublicConfig } from '../controllers/configController.js';
+import { expireOrdersCron } from '../controllers/cronController.js';
 import authRoutes from './authRoutes.js';
 import productRoutes from './productRoutes.js';
 import categoryRoutes from './categoryRoutes.js';
@@ -12,6 +13,7 @@ const router = Router();
 
 router.get('/health', (req, res) => res.json({ success: true, status: 'ok' }));
 router.get('/config', getPublicConfig);
+router.get('/cron/expire-orders', expireOrdersCron);
 
 router.use('/auth', authRoutes);
 router.use('/products', productRoutes);
