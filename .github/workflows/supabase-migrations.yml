@@ -1,0 +1,71 @@
+name: Supabase migrations
+
+# Pull requests: start a throwaway local Supabase Postgres, apply every migration
+# from scratch and lint the schema.
+# Pushes to master: apply new migrations to the linked Supabase project (db push).
+#
+# Required repository secrets (Settings -> Secrets and variables -> Actions):
+#   SUPABASE_ACCESS_TOKEN  - https://supabase.com/dashboard/account/tokens
+#   SUPABASE_DB_PASSWORD   - the project's database password
+#   SUPABASE_PROJECT_ID    - project ref, e.g. abcdefghijklmnopqrst (from the project URL)
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/supabase-migrations.yml'
+  push:
+    branches: [master]
+    paths:
+      - 'supabase/migrations/**'
+  workflow_dispatch:
+
+concurrency:
+  group: supabase-migrations-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate migrations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Start local database and apply migrations
+        run: supabase db start
+
+      - name: Lint schema
+        run: supabase db lint --level error
+
+      - name: Check applied migrations
+        run: supabase migration list --local
+
+  deploy:
+    name: Push migrations to Supabase
+    needs: validate
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_ID: ${{ secrets.SUPABASE_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Link project
+        run: supabase link --project-ref "$SUPABASE_PROJECT_ID"
+
+      - name: Show pending migrations
+        run: supabase migration list
+
+      - name: Apply migrations
+        run: supabase db push

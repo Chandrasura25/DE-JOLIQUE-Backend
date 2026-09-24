@@ -1,0 +1,41 @@
+{
+  "name": "jolique-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "De-Jolique Enterprise e-commerce API (Express + MongoDB)",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js",
+    "seed": "node src/seed/seed.js",
+    "seed:reset": "node src/seed/seed.js --reset",
+    "create-admin": "node src/scripts/createAdmin.js",
+    "test": "node --test --test-concurrency=1 --test-force-exit \"tests/**/*.test.js\""
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1138.0",
+    "@supabase/supabase-js": "^2.117.1",
+    "cloudinary": "^2.11.0",
+    "compression": "^1.8.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.3",
+    "express": "^4.22.3",
+    "express-rate-limit": "^8.7.0",
+    "helmet": "^8.3.0",
+    "jose": "^6.2.12",
+    "morgan": "^1.12.1",
+    "multer": "^2.4.0",
+    "pg": "^8.23.0",
+    "swagger-ui-express": "^5.0.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "embedded-postgres": "^18.4.0-beta.17",
+    "supertest": "^7.3.0"
+  }
+}

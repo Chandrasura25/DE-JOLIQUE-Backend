@@ -1,0 +1,53 @@
+# This folder is the root of the API repository; paths below are relative to it.
+
+# ---- Dependencies -----------------------------------------------------------
+node_modules/
+
+# ---- Secrets: never commit real env files (the template is allowed) ----------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.crt
+service-account*.json
+
+# ---- Local image uploads (STORAGE_PROVIDER=local, development only) ---------
+uploads/
+
+# ---- Supabase CLI local state -----------------------------------------------
+supabase/.branches/
+supabase/.temp/
+supabase/.env
+supabase/signing_keys.json
+
+# ---- Test / build output ----------------------------------------------------
+coverage/
+.nyc_output/
+dist/
+build/
+
+# ---- Deploy tooling (local project links, never commit) ---------------------
+.vercel/
+.netlify/
+.railway/
+.render/
+.fly/
+
+# ---- Logs -------------------------------------------------------------------
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ---- OS / editor ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+.claude/
