@@ -742,3 +742,34 @@ describe('password-guessing throttle (shared across instances via the database)'
     assert.ok(res.body.purgedLoginAttempts >= 1);
   });
 });
+
+describe('store settings (contact details)', () => {
+  test('the admin edits email, phone and address; the public config shows them', async () => {
+    const admin = await ctx.createUser({ role: 'admin' });
+    const customer = await ctx.createUser();
+    await api.get('/api/admin/settings').set(customer.auth).expect(403);
+    await api.put('/api/admin/settings').set(customer.auth).send({ supportEmail: 'x@example.com' }).expect(403);
+
+    const saved = await api
+      .put('/api/admin/settings')
+      .set(admin.auth)
+      .send({ supportEmail: ' Care@Example.com ', supportPhone: '+234 803 000 0000', postalAddress: '1 Marina, Lagos' })
+      .expect(200);
+    assert.deepEqual(
+      { e: saved.body.settings.supportEmail, p: saved.body.settings.supportPhone, a: saved.body.settings.postalAddress },
+      { e: 'care@example.com', p: '+234 803 000 0000', a: '1 Marina, Lagos' },
+    );
+
+    // Partial update leaves the other fields alone; '' clears one.
+    await api.put('/api/admin/settings').set(admin.auth).send({ supportPhone: '' }).expect(200);
+    const config = await api.get('/api/config').expect(200);
+    assert.deepEqual(config.body.config.contact, { email: 'care@example.com', phone: '', address: '1 Marina, Lagos' });
+
+    await api.put('/api/admin/settings').set(admin.auth).send({ supportEmail: 'not-an-email' }).expect(400);
+    await api.put('/api/admin/settings').set(admin.auth).send({ supportPhone: 'call me' }).expect(400);
+    await api.put('/api/admin/settings').set(admin.auth).send({ postalAddress: 'x'.repeat(301) }).expect(400);
+    await api.put('/api/admin/settings').set(admin.auth).send({}).expect(400);
+    const again = await api.get('/api/admin/settings').set(admin.auth).expect(200);
+    assert.equal(again.body.settings.supportEmail, 'care@example.com');
+  });
+});

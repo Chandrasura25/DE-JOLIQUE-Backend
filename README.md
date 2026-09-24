@@ -72,6 +72,7 @@ server/
 | `orders` | `order_number` (`JQ-001001`), `user_id`, `shipping_address JSONB`, `payment_method`, `payment_reference`, `payment_status`, `order_status`, `subtotal`, `shipping_fee`, `total_amount`, `currency`, `inventory_committed`, timestamps |
 | `order_items` | Product snapshot per line: `product_id`, `name`, `image`, `price`, `quantity`, `subtotal` |
 | `order_status_history` | Timeline shown to customers and the admin |
+| `store_settings` | Single row of admin-editable contact details (support email, phone, business address) shown in the footer and legal pages |
 | `payments` | One row per payment attempt: `provider`, `reference` (**unique**), `provider_transaction_id`, `amount`, `amount_paid`, `currency`, `status`, `gateway_response`, `raw` |
 
 ---
@@ -290,6 +291,7 @@ Full, interactive documentation: **`/api/docs`**. Summary:
 | POST / PUT / DELETE | `/api/admin/categories[/:id]` | admin |
 | GET | `/api/admin/orders`, `/api/admin/orders/:id` | admin |
 | PUT | `/api/admin/orders/:id/status` | admin |
+| GET / PUT | `/api/admin/settings` | admin (store contact email, phone, address) |
 | GET | `/api/admin/users` | admin |
 | DELETE | `/api/admin/users/:id` | admin (customers only) |
 | POST | `/api/admin/uploads` | admin |

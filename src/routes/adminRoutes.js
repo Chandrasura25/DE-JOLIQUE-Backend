@@ -16,9 +16,11 @@ import {
 } from '../controllers/orderController.js';
 import { uploadImages } from '../controllers/uploadController.js';
 import { deleteAdminUser, getAdminUsers } from '../controllers/userController.js';
+import { getAdminSettings, updateAdminSettings } from '../controllers/configController.js';
 import {
   adminOrderListQuery,
   adminUserListQuery,
+  storeSettingsBody,
   categoryBody,
   idParam,
   productListQuery,
@@ -43,6 +45,9 @@ router.delete('/categories/:id', validate({ params: idParam }), deleteCategoryHa
 router.get('/orders', validate({ query: adminOrderListQuery }), getAdminOrders);
 router.get('/orders/:id', validate({ params: idParam }), getAdminOrder);
 router.put('/orders/:id/status', validate({ params: idParam, body: updateOrderStatusBody }), updateOrderStatusHandler);
+
+router.get('/settings', getAdminSettings);
+router.put('/settings', validate({ body: storeSettingsBody }), updateAdminSettings);
 
 router.get('/users', validate({ query: adminUserListQuery }), getAdminUsers);
 router.delete('/users/:id', validate({ params: idParam }), deleteAdminUser);

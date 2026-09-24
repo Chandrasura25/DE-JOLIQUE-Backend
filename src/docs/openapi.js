@@ -138,6 +138,15 @@ export function buildOpenApiSpec() {
             createdAt: { type: 'string', format: 'date-time' },
           },
         },
+        StoreSettings: {
+          type: 'object',
+          properties: {
+            supportEmail: { type: 'string', format: 'email' },
+            supportPhone: { type: 'string', example: '+2348012345678' },
+            postalAddress: { type: 'string', maxLength: 300 },
+            updatedAt: { type: 'string', format: 'date-time', nullable: true },
+          },
+        },
         Image: {
           type: 'object',
           required: ['url'],
@@ -290,7 +299,7 @@ export function buildOpenApiSpec() {
       '/config': {
         get: {
           tags: ['System'],
-          summary: 'Public store settings (currency, delivery fee, enabled payment providers)',
+          summary: 'Public store settings (currency, delivery fee, enabled payment providers, contact email/phone/address)',
           responses: { 200: ok(envelope({ config: { type: 'object' } })) },
         },
       },
@@ -662,6 +671,16 @@ export function buildOpenApiSpec() {
           security: bearer,
           parameters: [idParam()],
           responses: { 200: ok(envelope({})), ...pick(401, 403, 404) },
+        },
+      },
+      '/admin/settings': {
+        get: { tags: ['Admin'], summary: 'Store contact details', security: bearer, responses: { 200: ok(envelope({ settings: ref('StoreSettings') })), ...pick(401, 403) } },
+        put: {
+          tags: ['Admin'],
+          summary: "Update store contact details (partial; '' clears a field). Shown in the footer and legal pages.",
+          security: bearer,
+          requestBody: json({ type: 'object', properties: { supportEmail: { type: 'string' }, supportPhone: { type: 'string' }, postalAddress: { type: 'string' } } }),
+          responses: { 200: ok(envelope({ settings: ref('StoreSettings') })), ...pick(400, 401, 403) },
         },
       },
       '/admin/users': {

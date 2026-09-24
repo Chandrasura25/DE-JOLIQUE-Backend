@@ -155,6 +155,15 @@ export const adminOrderListQuery = z.object({
   limit: limit(100, 20),
 });
 
+// Public business contact details; empty string clears a field.
+export const storeSettingsBody = z
+  .object({
+    supportEmail: z.union([z.string().trim().toLowerCase().email('Enter a valid email address.').max(254), z.literal('')]).optional(),
+    supportPhone: z.union([phone, z.literal('')]).optional(),
+    postalAddress: z.string().trim().max(300, 'Address must be at most 300 characters.').optional(),
+  })
+  .refine((v) => Object.values(v).some((x) => x !== undefined), 'Nothing to update.');
+
 export const adminUserListQuery = z.object({
   role: z.enum(['customer', 'admin']).optional(),
   search: z.string().trim().max(100).optional(),
