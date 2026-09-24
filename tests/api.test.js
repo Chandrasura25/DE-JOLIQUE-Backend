@@ -773,3 +773,17 @@ describe('store settings (contact details)', () => {
     assert.equal(again.body.settings.supportEmail, 'care@example.com');
   });
 });
+
+describe('CORS and caching', () => {
+  test('every allowed storefront origin gets its own CORS header, and API responses are never cached', async () => {
+    const res = await api.get('/api/config').set('Origin', 'http://localhost:5173').expect(200);
+    assert.equal(res.headers['access-control-allow-origin'], 'http://localhost:5173');
+    assert.equal(res.headers['access-control-allow-credentials'], 'true');
+    assert.match(res.headers.vary || '', /Origin/);
+    assert.equal(res.headers['cache-control'], 'no-store');
+    assert.equal(res.headers.etag, undefined, 'no ETag, so no 304 that could reuse stale CORS headers');
+
+    const other = await api.get('/api/config').set('Origin', 'https://evil.example').expect(200);
+    assert.equal(other.headers['access-control-allow-origin'], undefined);
+  });
+});

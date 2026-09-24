@@ -25,6 +25,9 @@ export function createApp() {
   const app = express();
 
   app.disable('x-powered-by');
+  // No ETag revalidation for API responses: a 304 carries no CORS headers, so the
+  // browser would reuse a stale Access-Control-Allow-Origin from its cached copy.
+  app.set('etag', false);
   if (env.TRUST_PROXY) app.set('trust proxy', env.TRUST_PROXY);
 
   app.use(
@@ -67,6 +70,13 @@ export function createApp() {
       maxAge: 600,
     }),
   );
+
+  // API responses are per-user and change constantly: never let a browser or CDN cache
+  // them (a cached reply can also carry a stale Access-Control-Allow-Origin).
+  app.use('/api', (req, res, next) => {
+    res.set('Cache-Control', 'no-store');
+    next();
+  });
 
   app.use(compression());
   // Paths only: query strings can carry one-time auth codes and payment references.
