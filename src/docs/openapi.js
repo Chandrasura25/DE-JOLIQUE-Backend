@@ -306,7 +306,35 @@ export function buildOpenApiSpec() {
         get: {
           tags: ['Auth'],
           summary: 'Sign-in methods enabled in Supabase Auth',
-          responses: { 200: ok(envelope({ providers: { type: 'object', properties: { email: { type: 'boolean' }, google: { type: 'boolean' } } } })) },
+          responses: {
+            200: ok(
+              envelope({
+                providers: {
+                  type: 'object',
+                  properties: {
+                    email: { type: 'boolean' },
+                    google: { type: 'boolean' },
+                    googleOneTapClientId: { type: 'string', nullable: true, description: 'Set when Google One Tap is available' },
+                  },
+                },
+              }),
+            ),
+          },
+        },
+      },
+      '/auth/google/one-tap/nonce': {
+        get: {
+          tags: ['Auth'],
+          summary: 'Nonce for the next Google One Tap prompt (SHA-256; the raw value is kept in an httpOnly cookie)',
+          responses: { 200: ok(envelope({ nonce: { type: 'string' } })), ...pick(429) },
+        },
+      },
+      '/auth/google/one-tap': {
+        post: {
+          tags: ['Auth'],
+          summary: 'Sign in with a Google One Tap ID token (sets session cookies). Needs the nonce cookie from the nonce call.',
+          requestBody: json({ type: 'object', required: ['credential'], properties: { credential: { type: 'string', description: 'Google ID token' } } }),
+          responses: { 200: ok(envelope({ user: ref('User') })), ...pick(400, 429) },
         },
       },
       '/auth/register': {
@@ -326,7 +354,7 @@ export function buildOpenApiSpec() {
           }),
           responses: {
             201: ok(envelope({ needsConfirmation: { type: 'boolean' }, user: ref('User') }), 'Created (sets session cookies unless needsConfirmation)'),
-            ...pick(400, 409, 429),
+            ...pick(400, 429),
           },
         },
       },

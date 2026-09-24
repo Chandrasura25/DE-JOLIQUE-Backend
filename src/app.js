@@ -7,13 +7,17 @@ import cors from 'cors';
 import compression from 'compression';
 import morgan from 'morgan';
 import cookieParser from 'cookie-parser';
-import env, { clientOrigins, isProduction, isTest } from './config/env.js';
+import env, { apiDocsEnabled, clientOrigins, isProduction, isTest } from './config/env.js';
 import routes from './routes/index.js';
 import docsRoutes from './routes/docsRoutes.js';
 import { apiLimiter } from './middleware/rateLimiters.js';
 import { rejectUntrustedOrigin } from './middleware/auth.js';
 import { errorHandler, notFound } from './middleware/error.js';
 import { LOCAL_UPLOAD_DIR } from './services/storage.js';
+
+const GSI = 'https://accounts.google.com/gsi/';
+
+morgan.token('path', (req) => req.originalUrl.split('?')[0]);
 
 const clientDist = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../client/dist');
 
@@ -30,15 +34,18 @@ export function createApp() {
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
-          scriptSrc: ["'self'"],
-          styleSrc: ["'self'", "'unsafe-inline'"],
+          // accounts.google.com/gsi: Google One Tap (when SERVE_CLIENT serves the storefront).
+          scriptSrc: ["'self'", GSI],
+          styleSrc: ["'self'", "'unsafe-inline'", GSI],
           imgSrc: ["'self'", 'data:', 'blob:', 'https:'],
           fontSrc: ["'self'", 'data:'],
           // The storefront only talks to this API; Supabase Auth is called server-side.
-          connectSrc: ["'self'"],
+          connectSrc: ["'self'", GSI],
+          frameSrc: [GSI],
           formAction: ["'self'"],
           frameAncestors: ["'none'"],
           objectSrc: ["'none'"],
+          baseUri: ["'self'"],
           upgradeInsecureRequests: isProduction ? [] : null,
         },
       },
@@ -62,7 +69,16 @@ export function createApp() {
   );
 
   app.use(compression());
-  if (!isTest) app.use(morgan(isProduction ? 'combined' : 'dev'));
+  // Paths only: query strings can carry one-time auth codes and payment references.
+  if (!isTest) {
+    app.use(
+      morgan(
+        isProduction
+          ? ':remote-addr [:date[iso]] ":method :path" :status :res[content-length] - :response-time ms'
+          : ':method :path :status :response-time ms',
+      ),
+    );
+  }
 
   // Keep the exact raw bytes: Paystack signs the raw webhook body.
   app.use(
@@ -83,8 +99,9 @@ export function createApp() {
     );
   }
 
-  // Swagger UI at /api/docs, raw OpenAPI spec at /api/docs.json
-  app.use('/api', docsRoutes);
+  // Swagger UI at /api/docs, raw OpenAPI spec at /api/docs.json. Off in production
+  // unless API_DOCS=true: a public map of every endpoint only helps attackers.
+  if (apiDocsEnabled) app.use('/api', docsRoutes);
   app.use('/api', rejectUntrustedOrigin, apiLimiter, routes);
   app.use('/api', notFound);
 

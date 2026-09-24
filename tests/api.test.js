@@ -167,7 +167,11 @@ describe('backend sessions (Supabase tokens in httpOnly cookies)', () => {
 
   test('Google sign-in: redirect to Supabase, then the callback exchanges the code with the PKCE verifier', async () => {
     const providers = await api.get('/api/auth/providers').expect(200);
-    assert.deepEqual(providers.body.providers, { email: true, google: true });
+    assert.deepEqual(providers.body.providers, {
+      email: true,
+      google: true,
+      googleOneTapClientId: 'test-client-id.apps.googleusercontent.com',
+    });
 
     const start = await api.get('/api/auth/google').query({ next: '/checkout' }).expect(302);
     const location = new URL(start.headers.location);
@@ -234,8 +238,10 @@ describe('backend sessions (Supabase tokens in httpOnly cookies)', () => {
         .expect(302);
       assert.equal(done.headers.location, 'http://localhost:5173/cart');
 
-      const dup = await api.post('/api/auth/register').send({ name: 'Dup', email, password: 'secret123' }).expect(409);
-      assert.match(dup.body.message, /already exists/);
+      // An existing email gets exactly the new-account answer: no way to probe who is a customer.
+      const dup = await api.post('/api/auth/register').send({ name: 'Dup', email, password: 'secret123' }).expect(201);
+      assert.deepEqual(dup.body, res.body);
+      assert.deepEqual(Object.keys(setCookies(dup)), Object.keys(setCookies(res)));
     } finally {
       ctx.auth.state.autoconfirm = true;
     }
@@ -670,5 +676,69 @@ describe('Vercel Cron endpoint', () => {
     await api.get('/api/cron/expire-orders').set('Authorization', 'Bearer test-cron-secret-extra').expect(404);
     const res = await api.get('/api/cron/expire-orders').set('Authorization', 'Bearer test-cron-secret').expect(200);
     assert.equal(typeof res.body.expired, 'number');
+  });
+});
+
+describe('Google One Tap', () => {
+  const oneTap = (cookie, credential) => {
+    const req = api.post('/api/auth/google/one-tap').send({ credential });
+    return cookie ? req.set('Cookie', cookie) : req;
+  };
+
+  test('signs in with an ID token bound to this browser’s nonce, and the nonce works once', async () => {
+    const user = await ctx.createUser({ name: 'Tap User' });
+    const nonceRes = await api.get('/api/auth/google/one-tap/nonce').expect(200);
+    assert.equal(nonceRes.headers['cache-control'], 'no-store');
+    const cookie = setCookies(nonceRes).jq_onetap_nonce;
+    assert.match(cookie.attrs, /HttpOnly/);
+    assert.match(cookie.attrs, /Path=\/api\/auth\/google/);
+    // The browser only sees the hash, never the raw nonce.
+    assert.notEqual(nonceRes.body.nonce, cookie.value);
+
+    const credential = `fake-google.${user.id}.${nonceRes.body.nonce}`;
+    const nonceCookie = cookieHeader({ jq_onetap_nonce: cookie.value });
+    const res = await oneTap(nonceCookie, credential).expect(200);
+    assert.equal(res.body.user.name, 'Tap User');
+    assert.ok(setCookies(res).jq_access?.value);
+    assert.doesNotMatch(JSON.stringify(res.body), /access_token|refresh_token/);
+    assert.match(setCookies(res).jq_onetap_nonce.attrs, /Expires=Thu, 01 Jan 1970/, 'nonce cleared after use');
+  });
+
+  test('rejects a token without the nonce cookie, or with another browser’s nonce', async () => {
+    const user = await ctx.createUser();
+    const mine = await api.get('/api/auth/google/one-tap/nonce').expect(200);
+    const theirs = await api.get('/api/auth/google/one-tap/nonce').expect(200);
+    const credential = `fake-google.${user.id}.${mine.body.nonce}`;
+
+    await oneTap(null, credential).expect(400);
+    const stolen = await oneTap(cookieHeader({ jq_onetap_nonce: setCookies(theirs).jq_onetap_nonce.value }), credential).expect(400);
+    assert.equal(setCookies(stolen).jq_access, undefined);
+    await oneTap(null, 'short').expect(400);
+  });
+});
+
+describe('password-guessing throttle (shared across instances via the database)', () => {
+  test('locks password login for an account after 10 failures, without affecting other accounts', async () => {
+    const victim = await ctx.createUser({ password: 'rightpass1' });
+    const bystander = await ctx.createUser({ password: 'rightpass1' });
+    for (let i = 0; i < 10; i += 1) {
+      await api.post('/api/auth/login').send({ email: victim.email, password: `wrong-${i}x` }).expect(400);
+    }
+    // Even the right password is refused while locked.
+    const locked = await api.post('/api/auth/login').send({ email: victim.email, password: 'rightpass1' }).expect(429);
+    assert.match(locked.body.message, /Too many failed attempts/);
+    await api.post('/api/auth/login').send({ email: bystander.email, password: 'rightpass1' }).expect(200);
+
+    // After the window the account works again, and success clears its history.
+    await ctx.db.query(`update public.login_attempts set created_at = now() - interval '16 minutes' where email = $1`, [victim.email]);
+    await api.post('/api/auth/login').send({ email: victim.email, password: 'rightpass1' }).expect(200);
+    const { rowCount } = await ctx.db.query('select 1 from public.login_attempts where email = $1', [victim.email]);
+    assert.equal(rowCount, 0);
+  });
+
+  test('the daily cron purges day-old attempts', async () => {
+    await ctx.db.query(`insert into public.login_attempts (email, created_at) values ('old@example.com', now() - interval '2 days')`);
+    const res = await api.get('/api/cron/expire-orders').set('Authorization', 'Bearer test-cron-secret').expect(200);
+    assert.ok(res.body.purgedLoginAttempts >= 1);
   });
 });

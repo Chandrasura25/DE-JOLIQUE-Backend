@@ -1,14 +1,27 @@
-import { clientOrigins } from '../config/env.js';
+import crypto from 'node:crypto';
+import env, { clientOrigins } from '../config/env.js';
+import AppError from '../utils/AppError.js';
 import asyncHandler from '../utils/asyncHandler.js';
-import { clearSessionCookies, safeNext, setFlowCookie, setSessionCookies, takeFlowCookie } from '../utils/authCookies.js';
+import {
+  clearSessionCookies,
+  safeNext,
+  setFlowCookie,
+  setOneTapNonceCookie,
+  setSessionCookies,
+  takeFlowCookie,
+  takeOneTapNonceCookie,
+} from '../utils/authCookies.js';
 import { authenticate } from '../middleware/auth.js';
+import { assertLoginAllowed, clearLoginFailures, recordLoginFailure } from '../services/loginThrottle.js';
 import {
   changePassword,
+  createOneTapNonce,
   exchangeCode,
   getAuthProviders,
   getOrCreateProfile,
   requestPasswordReset,
   resetPassword,
+  signInWithGoogleIdToken,
   signInWithPassword,
   signOut,
   signUp,
@@ -38,7 +51,9 @@ export const register = asyncHandler(async (req, res) => {
   const { session, verifier } = await signUp(details);
   if (!session) {
     // Email confirmation is on: the link in the email comes back to /api/auth/callback.
-    if (verifier) setFlowCookie(res, { verifier, next: safeNext(next) });
+    // An already-registered email has no verifier; a random one keeps the response
+    // (headers included) identical to a genuine sign-up.
+    setFlowCookie(res, { verifier: verifier || JSON.stringify(crypto.randomBytes(48).toString('base64url')), next: safeNext(next) });
     return res.status(201).json({ success: true, needsConfirmation: true, message: 'Check your email to confirm your account.' });
   }
   const profile = await startSession(res, session);
@@ -47,7 +62,16 @@ export const register = asyncHandler(async (req, res) => {
 
 /** POST /api/auth/login */
 export const login = asyncHandler(async (req, res) => {
-  const session = await signInWithPassword(req.body.email, req.body.password);
+  const { email, password } = req.body;
+  await assertLoginAllowed(email, req);
+  let session;
+  try {
+    session = await signInWithPassword(email, password);
+  } catch (err) {
+    if (err instanceof AppError && err.statusCode === 400) await recordLoginFailure(email, req);
+    throw err;
+  }
+  await clearLoginFailures(email);
   const profile = await startSession(res, session);
   res.json({ success: true, user: toUserDto(profile) });
 });
@@ -110,7 +134,27 @@ export const resetMyPassword = asyncHandler(async (req, res) => {
 
 /** GET /api/auth/providers */
 export const getProviders = asyncHandler(async (req, res) => {
-  res.json({ success: true, providers: { email: true, ...(await getAuthProviders()) } });
+  const { google } = await getAuthProviders();
+  res.json({
+    success: true,
+    providers: { email: true, google, googleOneTapClientId: google ? env.GOOGLE_CLIENT_ID || null : null },
+  });
+});
+
+/** GET /api/auth/google/one-tap/nonce — a fresh nonce for the next One Tap prompt. */
+export const oneTapNonce = asyncHandler(async (req, res) => {
+  const { raw, hashed } = createOneTapNonce();
+  setOneTapNonceCookie(res, raw);
+  res.set('Cache-Control', 'no-store').json({ success: true, nonce: hashed });
+});
+
+/** POST /api/auth/google/one-tap — redeem the ID token Google gave the browser. */
+export const oneTapSignIn = asyncHandler(async (req, res) => {
+  const rawNonce = takeOneTapNonceCookie(req, res);
+  if (!rawNonce) throw AppError.badRequest('Google sign-in expired. Please try again.');
+  const session = await signInWithGoogleIdToken(req.body.credential, rawNonce);
+  const profile = await startSession(res, session);
+  res.json({ success: true, user: toUserDto(profile) });
 });
 
 /** GET /api/auth/me */

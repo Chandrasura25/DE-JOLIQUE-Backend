@@ -45,6 +45,20 @@ export function takeFlowCookie(req, res) {
   }
 }
 
+const NONCE_COOKIE = 'jq_onetap_nonce';
+const nonceOptions = { ...base, path: '/api/auth/google' };
+
+/** The raw One Tap nonce; single use, valid for 10 minutes. */
+export function setOneTapNonceCookie(res, rawNonce) {
+  res.cookie(NONCE_COOKIE, rawNonce, { ...nonceOptions, maxAge: 10 * 60 * 1000 });
+}
+
+export function takeOneTapNonceCookie(req, res) {
+  const raw = req.cookies?.[NONCE_COOKIE];
+  if (raw) res.clearCookie(NONCE_COOKIE, nonceOptions);
+  return typeof raw === 'string' && raw ? raw : null;
+}
+
 /** Only same-site relative paths, so a crafted link can't bounce users to another site. */
 export function safeNext(value, fallback = '/account') {
   return typeof value === 'string' && /^\/(?![/\\])/.test(value) && value.length <= 200 ? value : fallback;

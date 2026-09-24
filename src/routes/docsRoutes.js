@@ -11,7 +11,7 @@ router.use(
   swaggerUi.serve,
   swaggerUi.setup(spec, {
     customSiteTitle: 'De-Jolique Enterprise API',
-    swaggerOptions: { persistAuthorization: true, displayRequestDuration: true },
+    swaggerOptions: { persistAuthorization: false, displayRequestDuration: true },
   }),
 );
 

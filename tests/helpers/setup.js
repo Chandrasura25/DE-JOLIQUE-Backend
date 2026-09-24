@@ -37,6 +37,7 @@ export async function setupTestApp() {
     LOW_STOCK_THRESHOLD: '5',
     CURRENCY: 'NGN',
     CRON_SECRET: 'test-cron-secret',
+    GOOGLE_CLIENT_ID: 'test-client-id.apps.googleusercontent.com',
   });
 
   const { createApp } = await import('../../src/app.js');

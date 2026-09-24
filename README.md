@@ -6,7 +6,7 @@ The backend for the De-Jolique Enterprise online store. It serves the product ca
 | --- | --- |
 | Runtime | **Node.js 22 + Express 4** |
 | Database | **Supabase Postgres**, accessed with `pg`; schema managed with **Supabase CLI migrations** |
-| Auth | **Supabase Auth** (email + password and Google), driven entirely by this API; tokens kept in httpOnly cookies |
+| Auth | **Supabase Auth** (email + password, Google, Google One Tap), driven entirely by this API; tokens kept in httpOnly cookies |
 | Docs | **Swagger / OpenAPI 3** at `/api/docs` |
 | Payments | Paystack, Flutterwave — initialised and **verified on the server** |
 | Images | Supabase Storage (default), Cloudinary, AWS S3 / Cloudflare R2, or local disk |
@@ -102,7 +102,7 @@ npm run dev                  # http://localhost:5000 (restarts on changes)
 On startup the server checks the database connection and that the migrations have been applied.
 
 - Health: <http://localhost:5000/api/health>
-- **Swagger UI: <http://localhost:5000/api/docs>** (raw spec at `/api/docs.json`)
+- **Swagger UI: <http://localhost:5000/api/docs>** (raw spec at `/api/docs.json`). It is **off in production** unless `API_DOCS=true`.
 
 To try protected endpoints in Swagger, run **`POST /auth/login`** there first. It sets the session cookie, and the rest of the calls on the same page use it. Scripts can send `Authorization: Bearer <access_token>` instead.
 
@@ -124,6 +124,8 @@ To try protected endpoints in Swagger, run **`POST /auth/login`** there first. I
 | `SUPABASE_URL` | ✔ | `https://<project-ref>.supabase.co` |
 | `SUPABASE_ANON_KEY` | ✔ | Used server-side for sign-in, sign-up, Google, refresh and password reset |
 | `SUPABASE_SERVICE_ROLE_KEY` | ✔ | Server only. Auth Admin API (users, admin account) and Storage uploads |
+| `GOOGLE_CLIENT_ID` | for One Tap | The Google OAuth **Web** client ID (public). Enables Google One Tap on the storefront. |
+| `API_DOCS` | | `true` to serve Swagger UI at `/api/docs` in production (it's off there by default) |
 | `AUTH_COOKIE_SAME_SITE` | | `lax` (default), `strict` or `none`. Only use `none` (HTTPS required) if the storefront calls the API cross-site without the proxy. |
 | `TRUST_PROXY` | | Number of proxies in front of the API, so rate limits see real client IPs. `1` on Vercel, Render or Railway. |
 | `SERVE_CLIENT` | | `true` to serve a built storefront from `../client/dist` (single-service deploy) |
@@ -184,6 +186,7 @@ The migrations create every store table, constraint, index and `updated_at` trig
 
 - **Authentication → URL Configuration:** set **Site URL** to the storefront, and add `<SERVER_URL>/api/auth/callback**` to **Redirect URLs**, for example `http://localhost:5000/api/auth/callback**` locally and `https://<storefront-domain>/api/auth/callback**` behind the Vercel proxy. Google, email-confirmation and password-reset links all return there.
 - **Google sign-in:** create an OAuth client (type *Web application*) in Google Cloud Console → APIs & Services → Credentials, with `https://<project-ref>.supabase.co/auth/v1/callback` as the authorised redirect URI. Paste its client ID and secret into **Authentication → Sign In / Providers → Google** and enable it. The storefront shows "Continue with Google" automatically once it's on (the API checks every few minutes).
+- **Google One Tap:** on the same Google OAuth client, add your storefront origins (`http://localhost:5173`, `https://<storefront-domain>`) under **Authorised JavaScript origins**, then set `GOOGLE_CLIENT_ID` on the API to that client ID. Leave **Skip nonce checks** *off* in Supabase's Google provider settings: the nonce is what ties each One Tap token to the browser it was issued to.
 - **Email confirmation** is on by default. New customers must click the link before they can log in. You can switch it off under **Authentication → Providers → Email** while developing.
 
 ### 4.5 Optional: run Supabase locally
@@ -248,7 +251,7 @@ npm test
 
 The integration tests run against a **real Postgres** (started automatically with `embedded-postgres`) with the actual `supabase/migrations` applied, plus a small local fake of Supabase Auth (ES256 JWKS, password/refresh/PKCE grants, sign-up, recovery, admin users). Only the outbound calls to Paystack and Flutterwave are replaced. They cover:
 
-- **auth:** cookie sessions (register, login, transparent refresh with rotation, logout revocation), Google and email-link callbacks, recovery-only password reset, CSRF origin check, open-redirect guard, forged/expired/wrong-issuer tokens, role injection through metadata
+- **auth:** cookie sessions (register, login, transparent refresh with rotation, logout revocation), Google and email-link callbacks, One Tap nonce binding and replay, the password-guessing lockout, no account enumeration on register, recovery-only password reset, CSRF origin check, open-redirect guard, forged/expired/wrong-issuer tokens, role injection through metadata
 - **admin:** role checks, the single-admin rule and `create-admin --replace`, user listing with last sign-in, user deletion that keeps order history
 - **products, orders, payments:** search/filter/sort, injection attempts, server-side pricing, stock limits, idempotent verification, **two buyers racing for the last unit**, webhook signatures and replays, refunds, abandoned-order expiry
 - **docs:** every Express route is in the OpenAPI spec, and vice versa
@@ -269,6 +272,7 @@ Full, interactive documentation: **`/api/docs`**. Summary:
 | POST | `/api/auth/register`, `/api/auth/login`, `/api/auth/forgot-password` | public (rate-limited) |
 | POST | `/api/auth/logout` | public |
 | GET | `/api/auth/google`, `/api/auth/callback` | browser redirects |
+| GET, POST | `/api/auth/google/one-tap/nonce`, `/api/auth/google/one-tap` | public (rate-limited) |
 | POST | `/api/auth/reset-password` | recovery-link session |
 | GET / PUT | `/api/auth/me` | signed in |
 | PUT | `/api/auth/change-password` | signed in (rate-limited) |
@@ -300,7 +304,10 @@ Errors always look like `{ "success": false, "message": "…", "details"?: [...]
 - The Supabase **access and refresh tokens live in httpOnly cookies** (`jq_access`, `jq_refresh`, path `/api`), so browser JavaScript never sees them.
 - When the access token has expired, the next request refreshes it with the refresh token and writes the new pair back. The refresh token rotates on every use.
 - Google, email-confirmation and password-reset links use **PKCE**. The verifier waits in a short-lived httpOnly cookie until `/api/auth/callback` exchanges the code, so a link must be opened in the browser that requested it.
+- **Google One Tap:** the API issues a fresh random nonce per prompt and keeps the raw value in an httpOnly cookie. The browser only gets its SHA-256, which Google embeds in the ID token. `POST /api/auth/google/one-tap` redeems the token with Supabase using the raw nonce, once, so a leaked One Tap token can't be replayed from anywhere else.
 - Setting a new password from a reset link only works in a session that was opened by that link within the last hour.
+- **Password guessing** is limited in the database, so the limits hold across every serverless instance. After 10 failures in 15 minutes an account's password login pauses for 15 minutes (Google sign-in and password reset still work), and 50 failures from one IP block that IP for 15 minutes.
+- **No account enumeration:** registering with an email that already exists returns exactly the same response (headers included) as a new sign-up, and forgot-password always answers the same way.
 - Logout revokes the session in Supabase and clears the cookies. Deleting a user signs them out everywhere at once.
 - The role is read from `public.profiles` on every request, never from the token.
 
@@ -334,16 +341,48 @@ Provider ─► POST /payments/<p>/webhook (signature checked) ─────�
 
 ## 12. Security
 
-- Helmet (CSP, HSTS in production), and CORS restricted to `CLIENT_URL`
-- **Sessions:** Supabase tokens only in httpOnly SameSite cookies; state-changing requests from any other `Origin` are rejected (CSRF)
-- Rate limits: API-wide, stricter on auth, order creation and payment endpoints
-- Every request body, query and path parameter is validated and whitelisted with zod
-- **SQL injection:** every query is parameterised; sort columns come from a fixed whitelist; `LIKE` wildcards are escaped
-- **Access tokens** are verified (signature, issuer, audience, expiry) on every protected request; admin APIs are enforced here, never just hidden in React
-- **RLS on every table**; the service role key stays on the server
-- Prices, totals and payment status are computed and verified server-side only
-- Uploads are limited by size and count and checked by file signature
-- Customer-safe error messages only; no stack traces
+What protects customers' accounts, data and payments, and the few settings you must get right.
+
+**Tokens and sessions**
+- Supabase access and refresh tokens live only in **httpOnly, Secure, SameSite** cookies scoped to `/api`. They're never in a response body, `localStorage` or a URL.
+- Access tokens are verified on every request (signature via JWKS, issuer, audience, expiry). The role is read from the database, never from the token.
+- Refresh tokens rotate on every use. Logout revokes the session in Supabase, and deleting a user ends their sessions immediately.
+- **CSRF:** a state-changing request whose `Origin` isn't the storefront is rejected. Google, email-link and One Tap flows are bound to the browser that started them (PKCE verifier or nonce in an httpOnly cookie).
+- Redirects after sign-in only go to same-site paths (no open redirects).
+
+**Customer data (emails, addresses, orders)**
+- **Row Level Security on every table, with no policies.** Supabase's public Data API returns nothing even with the public anon key (checked against the live project). Only this API, connecting as the database owner, can read data.
+- Customers only ever get their own orders; admin endpoints re-check the role from the database on every call. There is exactly one admin, and that account can't be deleted.
+- No account enumeration through register or forgot-password.
+- Logs record paths only, never query strings, so one-time auth codes and payment references stay out of them. Error responses never include stack traces or SQL.
+
+**Payments**
+- Totals are computed on the server from database prices; whatever the browser sends is ignored.
+- A payment only counts after the server asks Paystack/Flutterwave directly. Webhook signatures are checked in constant time, and even a correctly signed webhook is re-verified with the provider.
+- Stock and payment updates are transactional and idempotent. Secret keys never leave the server.
+
+**Abuse and hardening**
+- Rate limits: in-memory per instance for general traffic, plus the database-backed password-guessing limits.
+- Every body, query and path parameter is validated and whitelisted with zod, and every SQL query is parameterised.
+- Uploads are admin-only, size-limited and checked by file signature.
+- Helmet sets CSP, HSTS, `frame-ancestors 'none'` and the other security headers on the API. The storefront's `vercel.json` sets matching headers, including a strict CSP.
+- Swagger UI is off in production. Dependencies have no known vulnerabilities (`npm audit`).
+
+### Before going live: settings only you can change
+
+| Where | Setting | Why |
+| --- | --- | --- |
+| Supabase → Settings → Database | **Reset the database password**, then update `DATABASE_URL` everywhere | Rotate any credential that has ever appeared in chat, a screenshot or a terminal log |
+| Supabase → Settings → API | Keep the **service_role** key only in the API's environment variables | It bypasses every security rule |
+| Supabase → Authentication → Rate Limits | **Raise the sign-in, sign-up and token-refresh limits** | All auth calls come from the API's servers, so Supabase counts every customer against the same few IPs. The defaults are sized for one browser, and a busy day would lock everyone out. |
+| Supabase → Authentication → Providers → Email | Keep **Confirm email** and **Secure email change** on; minimum password length 8 | Stops sign-ups with other people's emails |
+| Supabase → Authentication → Providers → Email | Turn on **leaked password protection** (Pro plan) | Rejects passwords known from breaches |
+| Supabase → Authentication → URL Configuration | Redirect URLs: **only** your own `…/api/auth/callback**` entries | Stops auth links being sent anywhere else |
+| Supabase → Authentication → Multi-Factor | Plan to require MFA for the admin account | The admin can see every customer's details |
+| Paystack / Flutterwave | Enable 2FA on the dashboards; use live keys only in production | They hold the money |
+| Vercel (both projects) | Enable 2FA and limit team members | Anyone with Vercel access can read the environment variables |
+| Vercel → Firewall | Add a rate-limit rule for `/api/auth/*` | A second layer against bots, in front of the API |
+| Seeded admin | Change `ChangeMe123!` on first login (it's forced) | |
 
 ---
 

@@ -2,6 +2,7 @@ import env from './config/env.js';
 import { checkDatabaseConnection, closeDatabase, query } from './config/db.js';
 import { createApp } from './app.js';
 import { expireStalePendingOrders } from './services/paymentService.js';
+import { purgeOldLoginAttempts } from './services/loginThrottle.js';
 
 async function start() {
   try {
@@ -25,10 +26,12 @@ async function start() {
   });
 
   // Housekeeping: cancel abandoned unpaid orders (after checking with the provider).
-  const sweep = () =>
+  const sweep = () => {
     expireStalePendingOrders()
       .then((n) => n && console.log(`Expired ${n} unpaid order(s).`))
       .catch((err) => console.error('Order expiry job failed:', err.message));
+    purgeOldLoginAttempts().catch((err) => console.error('Login-attempt cleanup failed:', err.message));
+  };
   const timer = setInterval(sweep, 30 * 60 * 1000);
   timer.unref();
 

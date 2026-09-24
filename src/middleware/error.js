@@ -45,7 +45,7 @@ export function errorHandler(err, req, res, next) {
   }
 
   if (status >= 500 && !isTest) {
-    console.error(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`, err);
+    console.error(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl.split('?')[0]}`, err);
   }
 
   const body = { success: false, message };

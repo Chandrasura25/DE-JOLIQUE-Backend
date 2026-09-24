@@ -28,6 +28,10 @@ const schema = z.object({
   // Session cookies. Use "none" only when the storefront and API are on different sites
   // (it forces the Secure flag, so the API must be served over HTTPS).
   AUTH_COOKIE_SAME_SITE: z.enum(['lax', 'strict', 'none']).default('lax'),
+  // Google OAuth *Web* client ID (public). Enables Google One Tap on the storefront.
+  GOOGLE_CLIENT_ID: optionalString,
+  // Swagger UI at /api/docs. On by default, except in production where it must be switched on.
+  API_DOCS: z.enum(['true', 'false', '1', '0', '']).optional(),
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),
 
   CLIENT_URL: z.string().url().default('http://localhost:5173'),
@@ -89,6 +93,8 @@ if (missingForStorage.length) {
 }
 
 export const isProduction = env.NODE_ENV === 'production';
+
+export const apiDocsEnabled = env.API_DOCS ? ['true', '1'].includes(env.API_DOCS) : !isProduction;
 
 /** Storefront origins allowed to call the API with credentials (CLIENT_URL, comma-separated). */
 export const clientOrigins = env.CLIENT_URL.split(',').map((o) => o.trim().replace(/\/+$/, ''));

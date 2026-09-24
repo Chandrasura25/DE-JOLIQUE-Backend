@@ -67,6 +67,10 @@ export const resetPasswordBody = z.object({ password });
 
 export const oauthStartQuery = z.object({ next: nextPath });
 
+export const oneTapBody = z.object({
+  credential: z.string({ required_error: 'Missing Google credential.' }).min(20).max(8192),
+});
+
 // ----- Products -----
 export const productListQuery = z.object({
   search: z.string().trim().max(100).optional(),

@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { createRemoteJWKSet, decodeJwt, jwtVerify, errors as joseErrors } from 'jose';
 import env from '../config/env.js';
 import { query, withTransaction } from '../config/db.js';
@@ -80,9 +81,11 @@ export async function signUp({ name, email, phone, password }) {
     options: { data: { name, phone: phone || '' }, emailRedirectTo: authCallbackUrl },
   });
   if (error) throw authError(error, 'Unable to create your account.');
-  // With confirmations on, Supabase returns a user with no identities for an existing email.
+  // With confirmations on, Supabase answers an existing email with a stand-in user that
+  // has no identities. Reply exactly as for a new sign-up, so the endpoint can't be
+  // used to find out who is a customer (the real owner can log in or reset instead).
   if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-    throw AppError.conflict('An account with this email already exists. Try logging in.');
+    return { session: null, verifier: null };
   }
   return { session: data.session, verifier: storage.get(PKCE_VERIFIER_KEY) ?? null };
 }
@@ -96,6 +99,25 @@ export async function startOAuth(provider) {
   });
   if (error || !data?.url) throw authError(error, 'Unable to start sign-in.');
   return { url: data.url, verifier: storage.get(PKCE_VERIFIER_KEY) };
+}
+
+/**
+ * Google One Tap: a fresh random nonce per prompt. The browser only ever gets its
+ * SHA-256 (which Google embeds in the ID token); the raw value stays in an httpOnly
+ * cookie and is required to redeem the token, so a stolen ID token is useless.
+ */
+export function createOneTapNonce() {
+  const raw = crypto.randomBytes(32).toString('base64url');
+  const hashed = crypto.createHash('sha256').update(raw).digest('hex');
+  return { raw, hashed };
+}
+
+/** Exchanges a Google One Tap ID token (verified by Supabase Auth) for a session. */
+export async function signInWithGoogleIdToken(idToken, rawNonce) {
+  const { client } = createAuthClient();
+  const { data, error } = await client.auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: rawNonce });
+  if (error || !data?.session) throw authError(error, 'Google sign-in failed. Please try again.');
+  return data.session;
 }
 
 /** Finishes an OAuth or email-link flow that was started with a PKCE verifier. */

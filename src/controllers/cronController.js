@@ -3,6 +3,7 @@ import env from '../config/env.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import AppError from '../utils/AppError.js';
 import { expireStalePendingOrders } from '../services/paymentService.js';
+import { purgeOldLoginAttempts } from '../services/loginThrottle.js';
 
 function isCronRequest(req) {
   if (!env.CRON_SECRET) return false;
@@ -18,5 +19,6 @@ function isCronRequest(req) {
 export const expireOrdersCron = asyncHandler(async (req, res) => {
   if (!isCronRequest(req)) throw AppError.notFound();
   const expired = await expireStalePendingOrders();
-  res.json({ success: true, expired });
+  const purgedLoginAttempts = await purgeOldLoginAttempts();
+  res.json({ success: true, expired, purgedLoginAttempts });
 });

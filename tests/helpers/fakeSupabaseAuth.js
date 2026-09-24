@@ -79,6 +79,15 @@ export async function startFakeSupabaseAuth(db) {
         state.refreshTokens.delete(body.refresh_token);
         return [200, await issueSession(entry.userId, entry.amr)];
       }
+      if (grant === 'id_token') {
+        // Test tokens look like "fake-google.<userId>.<sha256 hex of the nonce>".
+        const [kind, userId, hashedNonce] = String(body.id_token).split('.');
+        const given = crypto.createHash('sha256').update(String(body.nonce ?? '')).digest('hex');
+        if (body.provider !== 'google' || kind !== 'fake-google' || !body.nonce || given !== hashedNonce) {
+          return [400, { error_code: 'bad_oauth_callback', msg: 'Passed nonce and nonce in id_token should either both exist or not.' }];
+        }
+        return [200, await issueSession(userId, [{ method: 'oauth', timestamp: now() }])];
+      }
       if (grant === 'pkce') {
         const entry = state.codes.get(body.auth_code);
         state.codes.delete(body.auth_code);

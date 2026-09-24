@@ -9,6 +9,8 @@ import {
   getMe,
   getProviders,
   googleSignIn,
+  oneTapNonce,
+  oneTapSignIn,
   login,
   logout,
   register,
@@ -20,6 +22,7 @@ import {
   forgotPasswordBody,
   loginBody,
   oauthStartQuery,
+  oneTapBody,
   registerBody,
   resetPasswordBody,
   updateProfileBody,
@@ -32,6 +35,8 @@ router.post('/register', authLimiter, validate({ body: registerBody }), register
 router.post('/login', authLimiter, validate({ body: loginBody }), login);
 router.post('/logout', logout);
 router.get('/google', authLimiter, validate({ query: oauthStartQuery }), googleSignIn);
+router.get('/google/one-tap/nonce', authLimiter, oneTapNonce);
+router.post('/google/one-tap', authLimiter, validate({ body: oneTapBody }), oneTapSignIn);
 router.get('/callback', authLimiter, authCallback);
 router.post('/forgot-password', authLimiter, validate({ body: forgotPasswordBody }), forgotPassword);
 router.post('/reset-password', authLimiter, protect, validate({ body: resetPasswordBody }), resetMyPassword);
