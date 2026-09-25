@@ -120,7 +120,13 @@ describe('backend sessions (Supabase tokens in httpOnly cookies)', () => {
   test('login checks the password with Supabase and sets the session', async () => {
     const user = await ctx.createUser({ name: 'Emeka', password: 'hunter22x' });
     const bad = await api.post('/api/auth/login').send({ email: user.email, password: 'wrong-pass1' }).expect(400);
-    assert.equal(bad.body.message, 'Invalid email or password.');
+    assert.equal(bad.body.message, 'Incorrect password. Try again or reset your password.');
+    const unknown = await api.post('/api/auth/login').send({ email: `nobody-${Date.now()}@example.com`, password: 'Whatever1!' }).expect(400);
+    assert.equal(unknown.body.message, 'No account found with this email. Check the spelling or create an account.');
+    const googleOnly = await ctx.createUser({ password: 'Unused123!' });
+    await ctx.db.query(`update auth.users set raw_app_meta_data = '{"providers": ["google"]}' where id = $1`, [googleOnly.id]);
+    const viaGoogle = await api.post('/api/auth/login').send({ email: googleOnly.email, password: 'Guess123!' }).expect(400);
+    assert.match(viaGoogle.body.message, /uses Google sign-in/);
     assert.equal(setCookies(bad).jq_access, undefined);
 
     const res = await api.post('/api/auth/login').send({ email: user.email.toUpperCase(), password: 'hunter22x' }).expect(200);

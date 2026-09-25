@@ -64,8 +64,27 @@ function authError(error, fallback) {
 export async function signInWithPassword(email, password) {
   const { client } = createAuthClient();
   const { data, error } = await client.auth.signInWithPassword({ email, password });
+  if (/invalid login credentials/i.test(error?.message || '')) throw await explainLoginFailure(email);
   if (error || !data.session) throw authError(error, 'Invalid email or password.');
   return data.session;
+}
+
+/**
+ * Supabase says only "invalid login credentials"; tell the customer which part was wrong:
+ * no such account, a Google-only account, or a wrong password.
+ */
+async function explainLoginFailure(email) {
+  const { rows } = await query(
+    `select coalesce(raw_app_meta_data -> 'providers', '[]'::jsonb) as providers
+       from auth.users where lower(email) = $1 limit 1`,
+    [email],
+  );
+  if (!rows.length) return AppError.badRequest('No account found with this email. Check the spelling or create an account.');
+  const providers = rows[0].providers;
+  if (!providers.includes('email') && providers.includes('google')) {
+    return AppError.badRequest('This account uses Google sign-in. Use "Continue with Google" instead.');
+  }
+  return AppError.badRequest('Incorrect password. Try again or reset your password.');
 }
 
 /**

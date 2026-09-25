@@ -309,7 +309,7 @@ Errors always look like `{ "success": false, "message": "…", "details"?: [...]
 - **Google One Tap:** the API issues a fresh random nonce per prompt and keeps the raw value in an httpOnly cookie. The browser only gets its SHA-256, which Google embeds in the ID token. `POST /api/auth/google/one-tap` redeems the token with Supabase using the raw nonce, once, so a leaked One Tap token can't be replayed from anywhere else.
 - Setting a new password from a reset link only works in a session that was opened by that link within the last hour.
 - **Password guessing** is limited in the database, so the limits hold across every serverless instance. After 10 failures in 15 minutes an account's password login pauses for 15 minutes (Google sign-in and password reset still work), and 50 failures from one IP block that IP for 15 minutes.
-- **Existing emails:** registering with an email that is already in use returns `409` with a clear message (a deliberate product choice, so it does reveal which emails have accounts; the auth rate limiter slows bulk probing). Forgot-password always answers the same way.
+- **Existing emails:** registering with an email that is already in use returns `409` with a clear message (a deliberate product choice, so it does reveal which emails have accounts; the auth rate limiter slows bulk probing). Login also says whether the email has no account, is Google-only, or had the wrong password. Forgot-password always answers the same way.
 - Logout revokes the session in Supabase and clears the cookies. Deleting a user signs them out everywhere at once.
 - The role is read from `public.profiles` on every request, never from the token.
 
