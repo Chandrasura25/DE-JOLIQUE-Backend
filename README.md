@@ -309,7 +309,7 @@ Errors always look like `{ "success": false, "message": "…", "details"?: [...]
 - **Google One Tap:** the API issues a fresh random nonce per prompt and keeps the raw value in an httpOnly cookie. The browser only gets its SHA-256, which Google embeds in the ID token. `POST /api/auth/google/one-tap` redeems the token with Supabase using the raw nonce, once, so a leaked One Tap token can't be replayed from anywhere else.
 - Setting a new password from a reset link only works in a session that was opened by that link within the last hour.
 - **Password guessing** is limited in the database, so the limits hold across every serverless instance. After 10 failures in 15 minutes an account's password login pauses for 15 minutes (Google sign-in and password reset still work), and 50 failures from one IP block that IP for 15 minutes.
-- **No account enumeration:** registering with an email that already exists returns exactly the same response (headers included) as a new sign-up, and forgot-password always answers the same way.
+- **Existing emails:** registering with an email that is already in use returns `409` with a clear message (a deliberate product choice, so it does reveal which emails have accounts; the auth rate limiter slows bulk probing). Forgot-password always answers the same way.
 - Logout revokes the session in Supabase and clears the cookies. Deleting a user signs them out everywhere at once.
 - The role is read from `public.profiles` on every request, never from the token.
 
@@ -377,7 +377,7 @@ What protects customers' accounts, data and payments, and the few settings you m
 | Supabase → Settings → Database | **Reset the database password**, then update `DATABASE_URL` everywhere | Rotate any credential that has ever appeared in chat, a screenshot or a terminal log |
 | Supabase → Settings → API | Keep the **service_role** key only in the API's environment variables | It bypasses every security rule |
 | Supabase → Authentication → Rate Limits | **Raise the sign-in, sign-up and token-refresh limits** | All auth calls come from the API's servers, so Supabase counts every customer against the same few IPs. The defaults are sized for one browser, and a busy day would lock everyone out. |
-| Supabase → Authentication → Providers → Email | Keep **Confirm email** and **Secure email change** on; minimum password length 8 | Stops sign-ups with other people's emails |
+| Supabase → Authentication → Providers → Email | Keep **Confirm email** and **Secure email change** on; minimum password length 8; **Password requirements**: lowercase, uppercase letters, digits and symbols | Stops sign-ups with other people's emails |
 | Supabase → Authentication → Providers → Email | Turn on **leaked password protection** (Pro plan) | Rejects passwords known from breaches |
 | Supabase → Authentication → URL Configuration | Redirect URLs: **only** your own `…/api/auth/callback**` entries | Stops auth links being sent anywhere else |
 | Supabase → Authentication → Multi-Factor | Plan to require MFA for the admin account | The admin can see every customer's details |

@@ -24,8 +24,10 @@ async function main() {
   if (!values.email || !values.password) {
     throw new Error('Usage: npm run create-admin -- --email you@example.com --password "Str0ngPass!" [--name "Your Name"] [--replace]');
   }
-  if (values.password.length < 8 || !/[A-Za-z]/.test(values.password) || !/[0-9]/.test(values.password)) {
-    throw new Error('Password must be at least 8 characters and contain letters and numbers.');
+  const pw = values.password;
+  const rules = [/[a-z]/, /[A-Z]/, /[0-9]/, /[!@#$%^&*()_+\-=[\]{};'\\:"|<>?,./`~]/];
+  if (pw.length < 8 || !rules.every((rule) => rule.test(pw))) {
+    throw new Error('Password must be at least 8 characters and contain an uppercase letter, a lowercase letter, a number and a special character.');
   }
   const { profile, created, replaced } = await upsertAdminUser({
     email: values.email,

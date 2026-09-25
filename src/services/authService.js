@@ -47,8 +47,7 @@ export function isInvalidTokenError(err) {
 const AUTH_MESSAGES = [
   [/invalid login credentials/i, 'Invalid email or password.'],
   [/email not confirmed/i, 'Please confirm your email address first. Check your inbox for the confirmation link.'],
-  [/already registered|already been registered|user already exists/i, 'An account with this email already exists. Try logging in.'],
-  [/password should be at least|weak password|password is known/i, 'Password is too weak. Use at least 8 characters with letters and numbers.'],
+  [/password should be at least|weak password|password is known/i, 'Password is too weak. Use at least 8 characters with an uppercase letter, a lowercase letter, a number and a special character.'],
   [/rate limit|too many|security purposes/i, 'Too many attempts. Please wait a few minutes and try again.'],
 ];
 
@@ -80,13 +79,13 @@ export async function signUp({ name, email, phone, password }) {
     password,
     options: { data: { name, phone: phone || '' }, emailRedirectTo: authCallbackUrl },
   });
+  // Supabase reports an existing email either as an error (confirmations off) or, with
+  // confirmations on, as a stand-in user that has no identities. Both get a clear 409.
+  const alreadyRegistered =
+    /already registered|already been registered|user already exists/i.test(error?.message || '') ||
+    (data?.user && Array.isArray(data.user.identities) && data.user.identities.length === 0);
+  if (alreadyRegistered) throw AppError.conflict('This email has already been used to register. Log in or reset your password instead.');
   if (error) throw authError(error, 'Unable to create your account.');
-  // With confirmations on, Supabase answers an existing email with a stand-in user that
-  // has no identities. Reply exactly as for a new sign-up, so the endpoint can't be
-  // used to find out who is a customer (the real owner can log in or reset instead).
-  if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-    return { session: null, verifier: null };
-  }
   return { session: data.session, verifier: storage.get(PKCE_VERIFIER_KEY) ?? null };
 }
 

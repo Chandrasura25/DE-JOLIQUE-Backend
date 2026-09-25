@@ -97,7 +97,7 @@ describe('backend sessions (Supabase tokens in httpOnly cookies)', () => {
     const email = `new-${Date.now()}@example.com`;
     const res = await api
       .post('/api/auth/register')
-      .send({ name: 'Ngozi Obi', email, phone: '08011112222', password: 'secret123' })
+      .send({ name: 'Ngozi Obi', email, phone: '08011112222', password: 'Secret123!', confirmPassword: 'Secret123!' })
       .expect(201);
     assert.equal(res.body.needsConfirmation, false);
     assert.equal(res.body.user.name, 'Ngozi Obi');
@@ -113,7 +113,8 @@ describe('backend sessions (Supabase tokens in httpOnly cookies)', () => {
     const me = await api.get('/api/auth/me').set('Cookie', cookieHeader({ jq_access: cookies.jq_access.value })).expect(200);
     assert.equal(me.body.user.email, email);
 
-    await api.post('/api/auth/register').send({ name: 'Again', email, password: 'secret123' }).expect(400);
+    const again = await api.post('/api/auth/register').send({ name: 'Again', email, password: 'Secret123!', confirmPassword: 'Secret123!' }).expect(409);
+    assert.match(again.body.message, /already been used to register/);
   });
 
   test('login checks the password with Supabase and sets the session', async () => {
@@ -220,11 +221,27 @@ describe('backend sessions (Supabase tokens in httpOnly cookies)', () => {
     assert.equal(done.headers.location, 'http://localhost:5173/account');
   });
 
+  test('register requires upper and lower case, a number, a special character and a matching confirmation', async () => {
+    const base = { name: 'Weak Pass', email: `weak-${Date.now()}@example.com` };
+    const noSymbol = await api.post('/api/auth/register').send({ ...base, password: '8Password', confirmPassword: '8Password' }).expect(400);
+    assert.match(noSymbol.body.message, /special character/);
+    const noNumber = await api.post('/api/auth/register').send({ ...base, password: 'Password!', confirmPassword: 'Password!' }).expect(400);
+    assert.match(noNumber.body.message, /number/);
+    const noUpper = await api.post('/api/auth/register').send({ ...base, password: '8password!', confirmPassword: '8password!' }).expect(400);
+    assert.match(noUpper.body.message, /uppercase/);
+    const noLower = await api.post('/api/auth/register').send({ ...base, password: '8PASSWORD!', confirmPassword: '8PASSWORD!' }).expect(400);
+    assert.match(noLower.body.message, /lowercase/);
+    const mismatch = await api.post('/api/auth/register').send({ ...base, password: '8Password!', confirmPassword: '8Password?' }).expect(400);
+    assert.equal(mismatch.body.message, 'Passwords do not match.');
+    await api.post('/api/auth/register').send({ ...base, password: '8Password!' }).expect(400);
+    await api.post('/api/auth/register').send({ ...base, password: '8Password!', confirmPassword: '8Password!' }).expect(201);
+  });
+
   test('email confirmation: sign-up without a session, then the emailed link signs the user in', async () => {
     ctx.auth.state.autoconfirm = false;
     try {
       const email = `confirm-${Date.now()}@example.com`;
-      const res = await api.post('/api/auth/register').send({ name: 'Confirm Me', email, password: 'secret123', next: '/cart' }).expect(201);
+      const res = await api.post('/api/auth/register').send({ name: 'Confirm Me', email, password: 'Secret123!', confirmPassword: 'Secret123!', next: '/cart' }).expect(201);
       assert.equal(res.body.needsConfirmation, true);
       assert.equal(setCookies(res).jq_access, undefined);
       assert.match(ctx.auth.state.pendingChallenges.at(-1).redirectTo, /\/api\/auth\/callback/);
@@ -238,10 +255,10 @@ describe('backend sessions (Supabase tokens in httpOnly cookies)', () => {
         .expect(302);
       assert.equal(done.headers.location, 'http://localhost:5173/cart');
 
-      // An existing email gets exactly the new-account answer: no way to probe who is a customer.
-      const dup = await api.post('/api/auth/register').send({ name: 'Dup', email, password: 'secret123' }).expect(201);
-      assert.deepEqual(dup.body, res.body);
-      assert.deepEqual(Object.keys(setCookies(dup)), Object.keys(setCookies(res)));
+      // An existing email is refused with a clear message, even while it is still unconfirmed.
+      const dup = await api.post('/api/auth/register').send({ name: 'Dup', email, password: 'Secret123!', confirmPassword: 'Secret123!' }).expect(409);
+      assert.match(dup.body.message, /already been used to register/);
+      assert.equal(setCookies(dup).jq_auth_flow, undefined);
     } finally {
       ctx.auth.state.autoconfirm = true;
     }
@@ -253,7 +270,7 @@ describe('backend sessions (Supabase tokens in httpOnly cookies)', () => {
     await api
       .post('/api/auth/reset-password')
       .set('Cookie', cookieHeader({ jq_access: normal.access_token }))
-      .send({ password: 'newpass123' })
+      .send({ password: 'Newpass123!', confirmPassword: 'Newpass123!' })
       .expect(403);
 
     const forgot = await api.post('/api/auth/forgot-password').send({ email: user.email }).expect(200);
@@ -268,14 +285,14 @@ describe('backend sessions (Supabase tokens in httpOnly cookies)', () => {
     await api
       .post('/api/auth/reset-password')
       .set('Cookie', cookieHeader({ jq_access: setCookies(back).jq_access.value }))
-      .send({ password: 'short' })
+      .send({ password: 'short', confirmPassword: 'short' })
       .expect(400);
     await api
       .post('/api/auth/reset-password')
       .set('Cookie', cookieHeader({ jq_access: setCookies(back).jq_access.value }))
-      .send({ password: 'newpass123' })
+      .send({ password: 'Newpass123!', confirmPassword: 'Newpass123!' })
       .expect(200);
-    assert.deepEqual(ctx.auth.state.passwordUpdates.at(-1), { id: user.id, password: 'newpass123' });
+    assert.deepEqual(ctx.auth.state.passwordUpdates.at(-1), { id: user.id, password: 'Newpass123!' });
   });
 });
 

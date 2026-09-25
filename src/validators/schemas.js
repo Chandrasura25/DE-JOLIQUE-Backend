@@ -37,24 +37,37 @@ const password = z
   .string()
   .min(8, 'Password must be at least 8 characters.')
   .max(72, 'Password must be at most 72 characters.')
-  .regex(/[A-Za-z]/, 'Password must contain a letter.')
-  .regex(/[0-9]/, 'Password must contain a number.');
+  .regex(/[a-z]/, 'Password must contain a lowercase letter.')
+  .regex(/[A-Z]/, 'Password must contain an uppercase letter.')
+  .regex(/[0-9]/, 'Password must contain a number.')
+  // Same symbol set Supabase Auth accepts for `lower_upper_letters_digits_symbols`.
+  .regex(/[!@#$%^&*()_+\-=[\]{};'\\:"|<>?,./`~]/, 'Password must contain a special character (e.g. ! @ # $ %).');
 
-export const changePasswordBody = z.object({
-  currentPassword: z.string().min(1, 'Current password is required.').max(200),
-  newPassword: password,
-});
+const confirmPassword = z.string({ required_error: 'Please confirm your password.' }).max(200);
+const passwordsMatch = (field) => (v) => v.confirmPassword === v[field];
+const mismatch = { message: 'Passwords do not match.', path: ['confirmPassword'] };
+
+export const changePasswordBody = z
+  .object({
+    currentPassword: z.string().min(1, 'Current password is required.').max(200),
+    newPassword: password,
+    confirmPassword,
+  })
+  .refine(passwordsMatch('newPassword'), mismatch);
 
 const email = z.string({ required_error: 'Email is required.' }).trim().toLowerCase().email('Enter a valid email address.').max(254);
 const nextPath = z.string().max(200).optional();
 
-export const registerBody = z.object({
-  name: trimmed(2, 100, 'Name'),
-  email,
-  phone: z.union([phone, z.literal('')]).optional(),
-  password,
-  next: nextPath,
-});
+export const registerBody = z
+  .object({
+    name: trimmed(2, 100, 'Name'),
+    email,
+    phone: z.union([phone, z.literal('')]).optional(),
+    password,
+    confirmPassword,
+    next: nextPath,
+  })
+  .refine(passwordsMatch('password'), mismatch);
 
 export const loginBody = z.object({
   email,
@@ -63,7 +76,7 @@ export const loginBody = z.object({
 
 export const forgotPasswordBody = z.object({ email });
 
-export const resetPasswordBody = z.object({ password });
+export const resetPasswordBody = z.object({ password, confirmPassword }).refine(passwordsMatch('password'), mismatch);
 
 export const oauthStartQuery = z.object({ next: nextPath });
 

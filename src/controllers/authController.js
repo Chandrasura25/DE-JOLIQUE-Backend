@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import env, { clientOrigins } from '../config/env.js';
 import AppError from '../utils/AppError.js';
 import asyncHandler from '../utils/asyncHandler.js';
@@ -51,9 +50,7 @@ export const register = asyncHandler(async (req, res) => {
   const { session, verifier } = await signUp(details);
   if (!session) {
     // Email confirmation is on: the link in the email comes back to /api/auth/callback.
-    // An already-registered email has no verifier; a random one keeps the response
-    // (headers included) identical to a genuine sign-up.
-    setFlowCookie(res, { verifier: verifier || JSON.stringify(crypto.randomBytes(48).toString('base64url')), next: safeNext(next) });
+    setFlowCookie(res, { verifier, next: safeNext(next) });
     return res.status(201).json({ success: true, needsConfirmation: true, message: 'Check your email to confirm your account.' });
   }
   const profile = await startSession(res, session);
